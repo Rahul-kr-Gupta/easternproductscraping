@@ -1,34 +1,34 @@
 #!/bin/bash
 
 echo "============================================================"
-echo "Eastern Distributors Scraper - Ubuntu Setup Script"
+echo "Eastern Distributors Scraper - Amazon Linux Setup Script"
 echo "============================================================"
 echo ""
 
-# Check if running on Ubuntu
-if ! grep -q "Ubuntu" /etc/os-release 2>/dev/null; then
-    echo "⚠ Warning: This script is designed for Ubuntu. You may need to adapt it for other distros."
+# Check if running on Amazon Linux
+if ! grep -q "Amazon Linux" /etc/os-release 2>/dev/null; then
+    echo "⚠ Warning: This script is designed for Amazon Linux (yum). You may need to adapt it for other distros."
     echo ""
 fi
 
 # Update package list
 echo "📦 Updating package list..."
-sudo apt update
+sudo yum update -y
 
 # Install Python3 and pip if not already installed
 echo ""
 echo "🐍 Installing Python3 and pip..."
-sudo apt install -y python3 python3-pip
+sudo yum install -y python3 python3-pip
 
 # Install Chrome/Chromium for Selenium
 echo ""
 echo "🌐 Installing Chromium browser..."
-sudo apt install -y chromium-browser
+sudo yum install -y chromium
 
 # Install ChromeDriver
 echo ""
 echo "🚗 Installing ChromeDriver..."
-sudo apt install -y chromium-chromedriver
+sudo yum install -y chromedriver
 
 # Create virtual environment (optional but recommended)
 echo ""
