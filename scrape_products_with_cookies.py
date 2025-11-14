@@ -10,8 +10,22 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 import subprocess
 
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
+
+DEFAULT_DB_CONFIG = {
+    'host': 'aws-1-ap-south-1.pooler.supabase.com',
+    'dbname': 'postgres',
+    'user': 'postgres.odpysbkgdzwcnwkrwrsw',
+    'password': 'IqxEqdiLbFJmEISw',
+    'port': '6543',
+    'sslmode': 'require'
+}
+
 class ProductScraper:
-    def __init__(self, csv_file, cookies_file, output_file):
+    def __init__(self, csv_file, cookies_file, output_file, db_config=None):
         self.csv_file = csv_file
         self.cookies_file = cookies_file
         self.output_file = output_file
@@ -19,6 +33,10 @@ class ProductScraper:
         self.last_cookie_refresh = None
         self.cookie_refresh_interval = 600
         self.products_scraped = 0
+        self.db_config = db_config or self._load_db_config()
+        self.db_connection = None
+        self.db_table = 'eastern_scraped_products'
+        self._db_warning_emitted = False
         
     def setup_driver(self):
         print("Setting up Chrome driver...")
@@ -99,6 +117,107 @@ class ProductScraper:
     def is_login_page(self):
         current_url = self.driver.current_url
         return 'login' in current_url.lower() or self.driver.current_url == 'https://pronto.eastdist.com/login'
+
+    def _load_db_config(self):
+        host = os.getenv('POSTGRES_HOST')
+        dbname = os.getenv('POSTGRES_DB')
+        user = os.getenv('POSTGRES_USER')
+        password = os.getenv('POSTGRES_PASSWORD')
+        port = os.getenv('POSTGRES_PORT', '5432')
+        sslmode = os.getenv('POSTGRES_SSLMODE', 'prefer')
+
+        if all([host, dbname, user, password]):
+            return {
+                'host': host,
+                'dbname': dbname,
+                'user': user,
+                'password': password,
+                'port': port,
+                'sslmode': sslmode
+            }
+        if DEFAULT_DB_CONFIG:
+            return DEFAULT_DB_CONFIG.copy()
+        return None
+
+    def connect_database(self):
+        if self.db_connection or self.db_config is None:
+            if self.db_config is None and not self._db_warning_emitted:
+                print("PostgreSQL configuration not provided; skipping database storage.")
+                self._db_warning_emitted = True
+            return
+
+        if psycopg2 is None:
+            if not self._db_warning_emitted:
+                print("psycopg2 is not installed; install psycopg2-binary to enable database storage.")
+                self._db_warning_emitted = True
+            return
+
+        try:
+            self.db_connection = psycopg2.connect(**self.db_config)
+            self.db_connection.autocommit = True
+            self.ensure_table()
+            print("Database connection established.")
+        except Exception as exc:
+            print(f"Failed to connect to PostgreSQL: {exc}")
+            self.db_connection = None
+
+    def ensure_table(self):
+        if not self.db_connection:
+            return
+
+        create_table_query = f"""
+            CREATE TABLE IF NOT EXISTS {self.db_table} (
+                sku TEXT PRIMARY KEY,
+                url TEXT,
+                product_name TEXT,
+                price TEXT,
+                description TEXT,
+                stock_status TEXT,
+                brand TEXT,
+                image_url TEXT,
+                pack_weight TEXT,
+                available_in TEXT,
+                scraped_at TIMESTAMP
+            )
+        """
+
+        with self.db_connection.cursor() as cursor:
+            cursor.execute(create_table_query)
+
+    def save_product_to_db(self, product_data):
+        if not self.db_connection or not product_data.get('sku'):
+            return
+
+        insert_query = f"""
+            INSERT INTO {self.db_table} (
+                sku, url, product_name, price, description, stock_status,
+                brand, image_url, pack_weight, available_in, scraped_at
+            )
+            VALUES (
+                %(sku)s, %(url)s, %(product_name)s, %(price)s, %(description)s,
+                %(stock_status)s, %(brand)s, %(image_url)s, %(pack_weight)s,
+                %(available_in)s, %(scraped_at)s
+            )
+            ON CONFLICT (sku) DO UPDATE SET
+                url = EXCLUDED.url,
+                product_name = EXCLUDED.product_name,
+                price = EXCLUDED.price,
+                description = EXCLUDED.description,
+                stock_status = EXCLUDED.stock_status,
+                brand = EXCLUDED.brand,
+                image_url = EXCLUDED.image_url,
+                pack_weight = EXCLUDED.pack_weight,
+                available_in = EXCLUDED.available_in,
+                scraped_at = EXCLUDED.scraped_at
+        """
+
+        with self.db_connection.cursor() as cursor:
+            cursor.execute(insert_query, product_data)
+
+    def close_database(self):
+        if self.db_connection:
+            self.db_connection.close()
+            self.db_connection = None
     
     def extract_product_details(self, url):
         try:
@@ -234,38 +353,43 @@ class ProductScraper:
         
         self.setup_driver()
         self.load_cookies()
+        self.connect_database()
         
         file_exists = os.path.exists(self.output_file)
         
-        with open(self.output_file, 'a', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['url', 'sku', 'product_name', 'price', 'description', 'stock_status', 
-                         'brand', 'image_url', 'pack_weight', 'available_in', 'scraped_at']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
-            if not file_exists:
-                writer.writeheader()
-            
-            for index, url in enumerate(product_urls, 1):
-                print(f"\n[{index}/{len(product_urls)}] Scraping: {url}")
+        try:
+            with open(self.output_file, 'a', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['url', 'sku', 'product_name', 'price', 'description', 'stock_status', 
+                             'brand', 'image_url', 'pack_weight', 'available_in', 'scraped_at']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 
-                product_data = self.extract_product_details(url)
+                if not file_exists:
+                    writer.writeheader()
                 
-                if product_data:
-                    product_data['scraped_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    writer.writerow(product_data)
-                    csvfile.flush()
+                for index, url in enumerate(product_urls, 1):
+                    print(f"\n[{index}/{len(product_urls)}] Scraping: {url}")
                     
-                    print(f"  ✓ Product: {product_data['product_name'][:50]}")
-                    print(f"  ✓ Price: {product_data['price']}")
-                else:
-                    print(f"  ✗ Failed to scrape this product")
-                
-                if index % 10 == 0:
-                    print(f"\n📊 Progress: {index}/{len(product_urls)} products scraped")
-                
-                time.sleep(1)
-        
-        self.driver.quit()
+                    product_data = self.extract_product_details(url)
+                    
+                    if product_data:
+                        product_data['scraped_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        writer.writerow(product_data)
+                        csvfile.flush()
+                        self.save_product_to_db(product_data.copy())
+                        
+                        print(f"  ✓ Product: {product_data['product_name'][:50]}")
+                        print(f"  ✓ Price: {product_data['price']}")
+                    else:
+                        print(f"  ✗ Failed to scrape this product")
+                    
+                    if index % 10 == 0:
+                        print(f"\n📊 Progress: {index}/{len(product_urls)} products scraped")
+                    
+                    time.sleep(1)
+        finally:
+            if self.driver:
+                self.driver.quit()
+            self.close_database()
         
         print("\n" + "="*60)
         print("SCRAPING COMPLETE!")
