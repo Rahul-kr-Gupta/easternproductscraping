@@ -15,20 +15,39 @@ fi
 echo "📦 Updating package list..."
 sudo yum update -y
 
-# Install Python3 and pip if not already installed
+# Install core tools, Python3, and pip if not already installed
 echo ""
-echo "🐍 Installing Python3 and pip..."
-sudo yum install -y python3 python3-pip
+echo "🐍 Installing Python3, pip, and helper utilities..."
+sudo yum install -y python3 python3-pip curl wget unzip
 
-# Install Chrome/Chromium for Selenium
+# Install Google Chrome for Selenium
 echo ""
-echo "🌐 Installing Chromium browser..."
-sudo yum install -y chromium
+echo "🌐 Installing Google Chrome..."
+if ! command -v google-chrome >/dev/null 2>&1; then
+    TEMP_CHROME="/tmp/google-chrome.rpm"
+    curl -L "https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm" -o "$TEMP_CHROME"
+    sudo yum install -y "$TEMP_CHROME"
+    rm -f "$TEMP_CHROME"
+else
+    echo "✓ Google Chrome already installed"
+fi
 
-# Install ChromeDriver
+# Install matching ChromeDriver
 echo ""
 echo "🚗 Installing ChromeDriver..."
-sudo yum install -y chromedriver
+if ! command -v chromedriver >/dev/null 2>&1; then
+    CHROME_VERSION=$(google-chrome --version | awk '{print $3}')
+    CHROME_MAJOR=${CHROME_VERSION%%.*}
+    DRIVER_VERSION=$(curl -sSL "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR}")
+    DRIVER_ZIP="/tmp/chromedriver_linux64.zip"
+    curl -sSL "https://chromedriver.storage.googleapis.com/${DRIVER_VERSION}/chromedriver_linux64.zip" -o "$DRIVER_ZIP"
+    unzip -q -o "$DRIVER_ZIP" -d /tmp
+    sudo mv /tmp/chromedriver /usr/local/bin/chromedriver
+    sudo chmod +x /usr/local/bin/chromedriver
+    rm -f "$DRIVER_ZIP"
+else
+    echo "✓ ChromeDriver already installed"
+fi
 
 # Create virtual environment (optional but recommended)
 echo ""
