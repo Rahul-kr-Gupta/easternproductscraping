@@ -36,11 +36,30 @@ fi
 echo ""
 echo "🚗 Installing ChromeDriver..."
 if ! command -v chromedriver >/dev/null 2>&1; then
-    CHROME_VERSION=$(google-chrome --version | awk '{print $3}')
+    CHROME_BIN=$(command -v google-chrome || command -v chrome || command -v chromium-browser || command -v chromium)
+    if [ -z "$CHROME_BIN" ]; then
+        echo "⚠ Unable to locate a Chrome/Chromium binary. Install Chrome before proceeding."
+        exit 1
+    fi
+
+    CHROME_VERSION=$("$CHROME_BIN" --version | awk '{print $3}')
+    CHROME_VERSION=$(printf "%s" "$CHROME_VERSION" | tr -d '\r')
     CHROME_MAJOR=${CHROME_VERSION%%.*}
-    DRIVER_VERSION=$(curl -sSL "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR}")
-    DRIVER_ZIP="/tmp/chromedriver_linux64.zip"
-    curl -sSL "https://chromedriver.storage.googleapis.com/${DRIVER_VERSION}/chromedriver_linux64.zip" -o "$DRIVER_ZIP"
+
+    if [ -z "$CHROME_MAJOR" ]; then
+        echo "⚠ Unable to determine Chrome version. Fetching latest ChromeDriver."
+        DRIVER_VERSION=$(curl -sSL https://chromedriver.storage.googleapis.com/LATEST_RELEASE | tr -d '\r')
+    else
+        DRIVER_VERSION=$(curl -sSL "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR}" | tr -d '\r')
+        if [ -z "$DRIVER_VERSION" ]; then
+            echo "⚠ Failed to match Chrome version; falling back to latest ChromeDriver."
+            DRIVER_VERSION=$(curl -sSL https://chromedriver.storage.googleapis.com/LATEST_RELEASE | tr -d '\r')
+        fi
+    fi
+
+    DRIVER_ZIP="/tmp/chromedriver-linux64.zip"
+    DRIVER_URL="https://chromedriver.storage.googleapis.com/${DRIVER_VERSION}/chromedriver-linux64.zip"
+    curl -sSL "$DRIVER_URL" -o "$DRIVER_ZIP"
     unzip -q -o "$DRIVER_ZIP" -d /tmp
     sudo mv /tmp/chromedriver /usr/local/bin/chromedriver
     sudo chmod +x /usr/local/bin/chromedriver
