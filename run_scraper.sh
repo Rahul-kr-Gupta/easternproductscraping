@@ -19,7 +19,8 @@ if [ -d "venv" ]; then
 fi
 
 # Run the daily scraper
-python3 daily_scraper.py
+python3 login_and_save_cookies_.py
+python3 scrape_products_with_cookies.py
 
 # Exit with the same code as the Python script
 exit $?
