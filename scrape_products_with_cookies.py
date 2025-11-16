@@ -184,6 +184,17 @@ class ProductScraper:
         with self.db_connection.cursor() as cursor:
             cursor.execute(create_table_query)
 
+    def clear_existing_database_rows(self):
+        """Remove existing rows before inserting new scrape results."""
+        if not self.db_connection:
+            return
+        try:
+            with self.db_connection.cursor() as cursor:
+                cursor.execute(f"TRUNCATE TABLE {self.db_table}")
+            print(f"Cleared existing rows from {self.db_table}.")
+        except Exception as exc:
+            print(f"Warning: Failed to clear {self.db_table}: {exc}")
+
     def save_product_to_db(self, product_data):
         if not self.db_connection or not product_data.get('sku'):
             return
@@ -213,6 +224,16 @@ class ProductScraper:
 
         with self.db_connection.cursor() as cursor:
             cursor.execute(insert_query, product_data)
+
+    def reset_output_csv(self, fieldnames):
+        """Rewrite the CSV file header so each run starts clean."""
+        try:
+            with open(self.output_file, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+            print(f"Cleared existing CSV data in {self.output_file}.")
+        except Exception as exc:
+            print(f"Warning: Failed to reset CSV file {self.output_file}: {exc}")
 
     def close_database(self):
         if self.db_connection:
@@ -354,17 +375,15 @@ class ProductScraper:
         self.setup_driver()
         self.load_cookies()
         self.connect_database()
-        
-        file_exists = os.path.exists(self.output_file)
-        
+        self.clear_existing_database_rows()
+
+        fieldnames = ['url', 'sku', 'product_name', 'price', 'description', 'stock_status', 
+                     'brand', 'image_url', 'pack_weight', 'available_in', 'scraped_at']
+        self.reset_output_csv(fieldnames)
+
         try:
             with open(self.output_file, 'a', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['url', 'sku', 'product_name', 'price', 'description', 'stock_status', 
-                             'brand', 'image_url', 'pack_weight', 'available_in', 'scraped_at']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                
-                if not file_exists:
-                    writer.writeheader()
                 
                 for index, url in enumerate(product_urls, 1):
                     print(f"\n[{index}/{len(product_urls)}] Scraping: {url}")
@@ -414,7 +433,8 @@ if __name__ == "__main__":
     print(f"Output CSV: {OUTPUT_CSV}")
     print("="*60)
     
-    mode = sys.argv[1] if len(sys.argv) > 1 else 'test'
+    # mode = sys.argv[1] if len(sys.argv) > 1 else 'test'
+    mode = 'full'
     
     if mode == 'full':
         print("\n⚠ FULL MODE: Scraping ALL 5229 products")
